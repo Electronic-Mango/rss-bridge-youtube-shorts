@@ -13,7 +13,6 @@ class YoutubeShortsBridge extends BridgeAbstract
     const URI = 'https://www.youtube.com';
     const CACHE_TIMEOUT = 3600;
     const DESCRIPTION = 'Returns the 10 newest shorts by username/channel/playlist or search';
-
     const PARAMETERS = [
         'By username' => [
             'u' => [
@@ -35,11 +34,18 @@ class YoutubeShortsBridge extends BridgeAbstract
                 'exampleValue' => 'LinusTechTips',
                 'required' => true
             ]
+        ],
+        'global' => [
+            'item_limit' => [
+                'name' => 'upper limit of items',
+                'type' => 'number',
+                'title' => 'Upper limit of how many items should be returned, 99 by default',
+                'required' => false,
+                'exampleValue' => 10
+            ]
         ]
     ];
 
-    // This took from repo BetterVideoRss of VerifiedJoseph.
-    private const URI_REGEX = '/(https?:\/\/(?:www\.)?(?:[a-zA-Z0-9-.]{2,256}\.[a-z]{2,20})(\:[0-9]{2    ,4})?(?:\/[a-zA-Z0-9@:%_\+.,~#"\'!?&\/\/=\-*]+|\/)?)/ims';  // phpcs:ignore
     private const DEFAULT_ITEM_LIMIT = 99;
 
     private $feedName = '';
@@ -74,13 +80,13 @@ class YoutubeShortsBridge extends BridgeAbstract
         }
 
         if ($username) {
-            $channelSpecifier = '/user/' . urlencode($username);
+            $sourcePath = '/user/' . urlencode($username);
         } elseif ($channel) {
-            $channelSpecifier = '/channel/' . urlencode($channel);
+            $sourcePath = '/channel/' . urlencode($channel);
         } else {
-            $channelSpecifier = '/' . urlencode($custom);
+            $sourcePath = '/' . urlencode($custom);
         }
-        $this->feedUri = self::URI . $channelSpecifier . '/shorts';
+        $this->feedUri = self::URI . $sourcePath . '/shorts';
         $html = $this->fetch($this->feedUri);
         $jsonData = $this->extractJsonFromHtml($html);
 
@@ -303,6 +309,7 @@ class YoutubeShortsBridge extends BridgeAbstract
 
     private function listingFetchItemsFromJsonData($jsonData)
     {
+        $maxItemCount = $this->getInput('item_limit') ?: self::DEFAULT_ITEM_LIMIT;
         foreach ($jsonData as $item) {
             if (!isset($item->richItemRenderer)) {
                 continue;
@@ -315,7 +322,7 @@ class YoutubeShortsBridge extends BridgeAbstract
             $timestamp = null;
             $this->fetchVideoDetails($videoId, $author, $description, $timestamp);
             $this->addItem($videoId, $title, $author, $description, $timestamp);
-            if (count($this->items) >= 99) {
+            if (count($this->items) >= $maxItemCount) {
                 break;
             }
         }
