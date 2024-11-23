@@ -11,7 +11,7 @@ class YoutubeShortsBridge extends BridgeAbstract
 {
     const NAME = 'YouTube Shorts Bridge';
     const URI = 'https://www.youtube.com';
-    const CACHE_TIMEOUT = 60 * 60 * 3;
+    const CACHE_TIMEOUT = 3600;
     const DESCRIPTION = 'Returns the 10 newest shorts by username/channel/playlist or search';
 
     const PARAMETERS = [
@@ -35,35 +35,16 @@ class YoutubeShortsBridge extends BridgeAbstract
                 'exampleValue' => 'LinusTechTips',
                 'required' => true
             ]
-        ],
-        'By playlist Id' => [
-            'p' => [
-                'name' => 'playlist id',
-                'exampleValue' => 'PL8mG-RkN2uTzJc8N0EoyhdC54prvBBLpj',
-                'required' => true
-            ]
-        ],
-        'Search result' => [
-            's' => [
-                'name' => 'search keyword',
-                'exampleValue' => 'LinusTechTips',
-                'required' => true
-            ],
-            'pa' => [
-                'name' => 'page',
-                'type' => 'number',
-                'title' => 'This option is not work anymore, as YouTube will always return the same page',
-                'exampleValue' => 1
-            ]
-        ],
-        'global' => []
+        ]
     ];
 
-    private $feedName = '';
-    private $feeduri = '';
-    private $feedIconUrl = '';
     // This took from repo BetterVideoRss of VerifiedJoseph.
-    const URI_REGEX = '/(https?:\/\/(?:www\.)?(?:[a-zA-Z0-9-.]{2,256}\.[a-z]{2,20})(\:[0-9]{2    ,4})?(?:\/[a-zA-Z0-9@:%_\+.,~#"\'!?&\/\/=\-*]+|\/)?)/ims'; //phpcs:ignore
+    private const URI_REGEX = '/(https?:\/\/(?:www\.)?(?:[a-zA-Z0-9-.]{2,256}\.[a-z]{2,20})(\:[0-9]{2    ,4})?(?:\/[a-zA-Z0-9@:%_\+.,~#"\'!?&\/\/=\-*]+|\/)?)/ims';  // phpcs:ignore
+    private const DEFAULT_ITEM_LIMIT = 99;
+
+    private $feedName = '';
+    private $feedUri = '';
+    private $feedIconUrl = '';
 
     public function collectData()
     {
@@ -84,82 +65,34 @@ class YoutubeShortsBridge extends BridgeAbstract
 
     private function collectDataInternal()
     {
-        $html = '';
-        $url_listing = '';
-
         $username = $this->getInput('u');
         $channel = $this->getInput('c');
         $custom = $this->getInput('custom');
-        $playlist = $this->getInput('p');
-        $search = $this->getInput('s');
-
-        if ($username) {
-            // user and channel
-            $url_listing = self::URI . '/user/' . urlencode($username) . '/shorts';
-        } elseif ($channel) {
-            $url_listing = self::URI . '/channel/' . urlencode($channel) . '/shorts';
-        } elseif ($custom) {
-            $url_listing = self::URI . '/' . urlencode($custom) . '/shorts';
-        }
-
-        if ($url_listing) {
-            // user, channel or custom
-            $this->feeduri = $url_listing;
-            $html = $this->fetch($url_listing, true);
-            $jsonData = $this->extractJsonFromHtml($html);
-            // Pluck out the rss feed url
-            $this->feedIconUrl = $jsonData->metadata->channelMetadataRenderer->avatar->thumbnails[0]->url;
-
-            $channel_id = '';
-            if (isset($jsonData->contents)) {
-                $channel_id = $jsonData->metadata->channelMetadataRenderer->externalId;
-                $jsonData = $jsonData->contents->twoColumnBrowseResultsRenderer->tabs[2];
-                $jsonData = $jsonData->tabRenderer->content->richGridRenderer->contents;
-                // $jsonData = $jsonData->itemSectionRenderer->contents[0]->gridRenderer->items;
-                $this->fetchItemsFromFromJsonData($jsonData);
-            } else {
-                returnServerError('Unable to get data from YouTube');
-            }
-            $this->feedName = str_replace(' - YouTube', '', $html->find('title', 0)->plaintext);
-        } elseif ($playlist) {
-            // playlist
-            $url_listing = self::URI . '/playlist?list=' . urlencode($playlist);
-            $html = $this->fetch($url_listing);
-            $jsonData = $this->extractJsonFromHtml($html);
-            // TODO: this method returns only first 100 video items
-            // if it has more videos, playlistVideoListRenderer will have continuationItemRenderer as last element
-            $jsonData = $jsonData->contents->twoColumnBrowseResultsRenderer->tabs[0] ?? null;
-            if (!$jsonData) {
-                // playlist probably doesnt exists
-                throw new \Exception('Unable to find playlist: ' . $url_listing);
-            }
-            $jsonData = $jsonData->tabRenderer->content->sectionListRenderer->contents[0]->itemSectionRenderer;
-            $jsonData = $jsonData->contents[0]->playlistVideoListRenderer->contents;
-            $item_count = count($jsonData);
-
-            $this->fetchItemsFromFromJsonData($jsonData);
-  
-            $this->feedName = 'Playlist: ' . str_replace(' - YouTube', '', $html->find('title', 0)->plaintext);
-            usort($this->items, function ($item1, $item2) {
-                if (!is_int($item1['timestamp']) && !is_int($item2['timestamp'])) {
-                    $item1['timestamp'] = strtotime($item1['timestamp']);
-                    $item2['timestamp'] = strtotime($item2['timestamp']);
-                }
-                return $item2['timestamp'] - $item1['timestamp'];
-            });
-        } elseif ($search) {
-            // search
-            $url_listing = self::URI . '/results?search_query=' . urlencode($search) . '&sp=CAI%253D';
-            $html = $this->fetch($url_listing);
-            $jsonData = $this->extractJsonFromHtml($html);
-            $jsonData = $jsonData->contents->twoColumnSearchResultsRenderer->primaryContents;
-            $jsonData = $jsonData->sectionListRenderer->contents[0]->itemSectionRenderer->contents;
-            $this->fetchItemsFromFromJsonData($jsonData);
-            $this->feeduri = $url_listing;
-            $this->feedName = 'Search: ' . $search;
-        } else {
+        
+        if (!$username && !$channel && !$custom) {
             returnClientError("You must either specify either:\n - YouTube username (?u=...)\n - Channel id (?c=...)\n - Playlist id (?p=...)\n - Search (?s=...)");
         }
+
+        if ($username) {
+            $channelSpecifier = '/user/' . urlencode($username);
+        } elseif ($channel) {
+            $channelSpecifier = '/channel/' . urlencode($channel);
+        } else {
+            $channelSpecifier = '/' . urlencode($custom);
+        }
+        $this->feedUri = self::URI . $channelSpecifier . '/shorts';
+        $html = $this->fetch($this->feedUri);
+        $jsonData = $this->extractJsonFromHtml($html);
+
+        if (!$jsonData || !isset($jsonData->contents)) {
+            returnServerError('Unable to get data from YouTube');
+        }
+
+        $this->feedIconUrl = $jsonData->metadata->channelMetadataRenderer->avatar->thumbnails[0]->url;
+        $jsonData = $jsonData->contents->twoColumnBrowseResultsRenderer->tabs[2];
+        $jsonData = $jsonData->tabRenderer->content->richGridRenderer->contents;
+        $this->listingFetchItemsFromJsonData($jsonData);
+        $this->feedName = str_replace(' - YouTube', '', $html->find('title', 0)->plaintext);
     }
 
     private function fetchVideoDetails($videoId, &$author, &$description, &$timestamp)
@@ -345,26 +278,6 @@ class YoutubeShortsBridge extends BridgeAbstract
         return array_reverse($enhancements);
     }
 
-    private function extractItemsFromXmlFeed($xml)
-    {
-        $this->feedName = $this->decodeTitle($xml->find('feed > title', 0)->plaintext);
-
-        foreach ($xml->find('entry') as $element) {
-            $videoId = str_replace('yt:video:', '', $element->find('id', 0)->plaintext);
-            if (strpos($videoId, 'googleads') !== false) {
-                continue;
-            }
-            $title = $this->decodeTitle($element->find('title', 0)->plaintext);
-            $author = $element->find('name', 0)->plaintext;
-            $desc = $element->find('media:description', 0)->innertext;
-            $desc = htmlspecialchars($desc);
-            $desc = nl2br($desc);
-            $desc = preg_replace(self::URI_REGEX, '<a href="$1" target="_blank">$1</a> ', $desc);
-            $time = strtotime($element->find('published', 0)->plaintext);
-            $this->addItem($videoId, $title, $author, $desc, $time);
-        }
-    }
-
     private function fetch($url, bool $cache = false)
     {
         $header = ['Accept-Language: en-US'];
@@ -388,15 +301,13 @@ class YoutubeShortsBridge extends BridgeAbstract
         return $data;
     }
 
-    private function fetchItemsFromFromJsonData($jsonData)
+    private function listingFetchItemsFromJsonData($jsonData)
     {
         foreach ($jsonData as $item) {
-            $wrapper = null;
-            if (isset($item->richItemRenderer)) {
-                $wrapper = $item->richItemRenderer->content->shortsLockupViewModel;
-            } else {
+            if (!isset($item->richItemRenderer)) {
                 continue;
             }
+            $wrapper = $item->richItemRenderer->content->shortsLockupViewModel;
             $videoId = $wrapper->onTap->innertubeCommand->reelWatchEndpoint->videoId;
             $title = $wrapper->overlayMetadata->primaryText->content ?? null;
             $author = null;
@@ -440,8 +351,8 @@ class YoutubeShortsBridge extends BridgeAbstract
     {
         if (!is_null($this->getInput('p'))) {
             return static::URI . '/playlist?list=' . $this->getInput('p');
-        } elseif ($this->feeduri) {
-            return $this->feeduri;
+        } elseif ($this->feedUri) {
+            return $this->feedUri;
         }
 
         return parent::getURI();
