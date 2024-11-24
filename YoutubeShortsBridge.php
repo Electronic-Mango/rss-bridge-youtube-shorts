@@ -71,7 +71,7 @@ class YoutubeShortsBridge extends BridgeAbstract
         $username = $this->getInput('u');
         $channel = $this->getInput('c');
         $custom = $this->getInput('custom');
-        
+
         if (!$username && !$channel && !$custom) {
             returnClientError("You must either specify either:\n - YouTube username (?u=...)\n - Channel id (?c=...)\n - Playlist id (?p=...)\n - Search (?s=...)");
         }
@@ -96,6 +96,50 @@ class YoutubeShortsBridge extends BridgeAbstract
         $jsonData = $jsonData->tabRenderer->content->richGridRenderer->contents;
         $this->listingFetchItemsFromJsonData($jsonData);
         $this->feedName = str_replace(' - YouTube', '', $html->find('title', 0)->plaintext);
+    }
+
+    private function fetch($url, bool $cache = false)
+    {
+        $header = ['Accept-Language: en-US'];
+        $ttl = 86400 * 3; // 3d
+        $stripNewlines = false;
+        if ($cache) {
+            return getSimpleHTMLDOMCached($url, $ttl, $header, [], true, true, DEFAULT_TARGET_CHARSET, $stripNewlines);
+        }
+        return getSimpleHTMLDOM($url, $header, [], true, true, DEFAULT_TARGET_CHARSET, $stripNewlines);
+    }
+
+    private function extractJsonFromHtml($html)
+    {
+        $scriptRegex = '/var ytInitialData = (.*?);<\/script>/';
+        $result = preg_match($scriptRegex, $html, $matches);
+        if (! $result) {
+            $this->logger->debug('Could not find ytInitialData');
+            return null;
+        }
+        $data = json_decode($matches[1]);
+        return $data;
+    }
+
+    private function listingFetchItemsFromJsonData($jsonData)
+    {
+        $maxItemCount = $this->getInput('item_limit') ?: self::DEFAULT_ITEM_LIMIT;
+        foreach ($jsonData as $item) {
+            if (!isset($item->richItemRenderer)) {
+                continue;
+            }
+            $wrapper = $item->richItemRenderer->content->shortsLockupViewModel;
+            $videoId = $wrapper->onTap->innertubeCommand->reelWatchEndpoint->videoId;
+            $title = $wrapper->overlayMetadata->primaryText->content ?? null;
+            $author = null;
+            $description = null;
+            $timestamp = null;
+            $this->fetchVideoDetails($videoId, $author, $description, $timestamp);
+            $this->addItem($videoId, $title, $author, $description, $timestamp);
+            if (count($this->items) >= $maxItemCount) {
+                break;
+            }
+        }
     }
 
     private function fetchVideoDetails($videoId, &$author, &$description, &$timestamp)
@@ -281,50 +325,6 @@ class YoutubeShortsBridge extends BridgeAbstract
         return array_reverse($enhancements);
     }
 
-    private function fetch($url, bool $cache = false)
-    {
-        $header = ['Accept-Language: en-US'];
-        $ttl = 86400 * 3; // 3d
-        $stripNewlines = false;
-        if ($cache) {
-            return getSimpleHTMLDOMCached($url, $ttl, $header, [], true, true, DEFAULT_TARGET_CHARSET, $stripNewlines);
-        }
-        return getSimpleHTMLDOM($url, $header, [], true, true, DEFAULT_TARGET_CHARSET, $stripNewlines);
-    }
-
-    private function extractJsonFromHtml($html)
-    {
-        $scriptRegex = '/var ytInitialData = (.*?);<\/script>/';
-        $result = preg_match($scriptRegex, $html, $matches);
-        if (! $result) {
-            $this->logger->debug('Could not find ytInitialData');
-            return null;
-        }
-        $data = json_decode($matches[1]);
-        return $data;
-    }
-
-    private function listingFetchItemsFromJsonData($jsonData)
-    {
-        $maxItemCount = $this->getInput('item_limit') ?: self::DEFAULT_ITEM_LIMIT;
-        foreach ($jsonData as $item) {
-            if (!isset($item->richItemRenderer)) {
-                continue;
-            }
-            $wrapper = $item->richItemRenderer->content->shortsLockupViewModel;
-            $videoId = $wrapper->onTap->innertubeCommand->reelWatchEndpoint->videoId;
-            $title = $wrapper->overlayMetadata->primaryText->content ?? null;
-            $author = null;
-            $description = null;
-            $timestamp = null;
-            $this->fetchVideoDetails($videoId, $author, $description, $timestamp);
-            $this->addItem($videoId, $title, $author, $description, $timestamp);
-            if (count($this->items) >= $maxItemCount) {
-                break;
-            }
-        }
-    }
-
     private function addItem($videoId, $title, $author, $description, $timestamp, $thumbnail = '')
     {
         $description = nl2br($description);
@@ -343,12 +343,6 @@ class YoutubeShortsBridge extends BridgeAbstract
         $thumbnailUri = str_replace('/www.', '/img.', self::URI) . '/vi/' . $videoId . '/' . $thumbnail . '.jpg';
         $item['content'] = sprintf('<a href="%s"><img src="%s" /></a><br />%s', $item['uri'], $thumbnailUri, $description);
         $this->items[] = $item;
-    }
-
-    private function decodeTitle($title)
-    {
-        // convert both &#1234; and &quot; to UTF-8
-        return html_entity_decode($title, ENT_QUOTES, 'UTF-8');
     }
 
     public function getURI()
