@@ -3,16 +3,13 @@
 /**
 * RssBridgeYoutubeShorts
 * Returns the newest shorts
-* WARNING: to parse big playlists (over ~90 videos), you need to edit simple_html_dom.php:
-* change: define('MAX_FILE_SIZE', 600000);
-* into:   define('MAX_FILE_SIZE', 900000);  (or more)
 */
 class YoutubeShortsBridge extends BridgeAbstract
 {
     const NAME = 'YouTube Shorts Bridge';
     const URI = 'https://www.youtube.com';
-    const CACHE_TIMEOUT = 3600;
-    const DESCRIPTION = 'Returns the 10 newest shorts by username/channel/playlist or search';
+    const CACHE_TIMEOUT = 60 * 60 * 3;
+    const DESCRIPTION = 'Returns the 10 newest shorts by username/channel/custom name';
     const PARAMETERS = [
         'By username' => [
             'u' => [
@@ -37,9 +34,9 @@ class YoutubeShortsBridge extends BridgeAbstract
         ],
         'global' => [
             'item_limit' => [
-                'name' => 'upper limit of items',
+                'name' => 'item number upper limit',
                 'type' => 'number',
-                'title' => 'Upper limit of how many items should be returned, 99 by default',
+                'title' => 'Upper limit of how many items can be returned, 99 by default',
                 'required' => false,
                 'exampleValue' => 10
             ]
