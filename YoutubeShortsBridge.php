@@ -101,7 +101,7 @@ class YoutubeShortsBridge extends BridgeAbstract
     private function fetch($url, bool $cache = false)
     {
         $header = ['Accept-Language: en-US'];
-        $ttl = 86400 * 3; // 3d
+        $ttl = 86400;  // 1 day
         $stripNewlines = false;
         if ($cache) {
             return getSimpleHTMLDOMCached($url, $ttl, $header, [], true, true, DEFAULT_TARGET_CHARSET, $stripNewlines);
